@@ -63,6 +63,7 @@ void setup() {
   speedMMPS = 100;
   _2WD.switchMotors();   // Swap motor robot to swap front and rear
   _2WD.PIDEnable(1, 0.02, 0.15, WHEELREFRESH);
+  Serial.println("Source from LDC");
   Serial.println("Placing Bot");
 
   Timer1.initialize(WHEELREFRESH * 1000); // set a timer of length 100000 microseconds (or 0.1 sec - or 10Hz => the led will blink 5 times, 5 cycles of on-and-off, per second)
