@@ -35,9 +35,9 @@
 
 // sensors 0 through 7 are connected to digital pins 3 through 10
 QTRSensorsRC gQtrrc((unsigned char[]) {
-  A5, 9, 8, 10, A0, A1, A2, A4
-},
-NUM_SENSORS, TIMEOUT, EMITTER_PIN);
+        A5, 9, 8, 10, A0, A1, A2, A4
+        },
+        NUM_SENSORS, TIMEOUT, EMITTER_PIN);
 unsigned int gSensorValues[NUM_SENSORS];
 unsigned int gSensorThreshold = 0;
 
@@ -45,64 +45,72 @@ unsigned int gSensorThreshold = 0;
 // PID definition
 //////////////////////////////////
 bool gPIDEnabled = false;
-int gLastError = 0;
-float KP = 0.5;
-float KD = 2;
+long gLastTime = 0;
+float gErrorSum = 0;
+float gLastError = 0;
+float KP = 0.125;
+float KI = 0.4;
+float KD = 0.18;
 
-int gSpeed = 50;
+int gSpeed = 100;
+
+int gLineLostTime = 0;
+
+byte gRightDirection = RIGHT_FORWARD;
+byte gLeftDirection = LEFT_FORWARD;
 
 //////////////////////////////////
 // Setup
 //////////////////////////////////
 void waitForInput(char* msg)
 {
-  Serial.println("Put robot completely on the line");
-  while(Serial.available() <= 0);
-  while(Serial.available() > 0)
-    Serial.read();
+    Serial.println("Put robot completely on the line");
+    while(Serial.available() <= 0);
+    while(Serial.available() > 0)
+        Serial.read();
 }
 
 void setup()
 {
-  // Définir la direction des pins
-  pinMode(pinLeftMotorPwm, OUTPUT);
-  pinMode(pinLeftMotorDir, OUTPUT);
+    // Définir la direction des pins
+    pinMode(pinLeftMotorPwm, OUTPUT);
+    pinMode(pinLeftMotorDir, OUTPUT);
 
-  pinMode(pinRightMotorPwm, OUTPUT);
-  pinMode(pinRightMotorDir, OUTPUT);
-  
-  // Définir les états par défaut
-  digitalWrite(pinLeftMotorDir, LEFT_FORWARD);
-  digitalWrite(pinRightMotorDir, RIGHT_FORWARD);
+    pinMode(pinRightMotorPwm, OUTPUT);
+    pinMode(pinRightMotorDir, OUTPUT);
 
-  Serial.begin(115200);
-  
-  waitForInput("Put robot completely on the line");
-  for(int i = 0; i < 20; ++i)
-  {
-    gQtrrc.calibrate();
-    delay(20);
-  }
+    // Définir les états par défaut
+    digitalWrite(pinLeftMotorDir, LEFT_FORWARD);
+    digitalWrite(pinRightMotorDir, RIGHT_FORWARD);
 
-  waitForInput("Put robot completely off the line");
-  for(int i = 0; i < 20; ++i)
-  {
-    gQtrrc.calibrate();
-    delay(20);
-  }
+    Serial.begin(115200);
 
-  int min = 0;
-  int max = 65535;
-  for (int i = 0; i < NUM_SENSORS; ++i)
-  {
-    if (gQtrrc.calibratedMinimumOn[i] > min)
-      min = gQtrrc.calibratedMinimumOn[i];
-    if (gQtrrc.calibratedMaximumOn[i] < max)
-      max = gQtrrc.calibratedMaximumOn[i];
-  }
+    waitForInput("Put robot completely on the line");
+    for(int i = 0; i < 20; ++i)
+    {
+        gQtrrc.calibrate();
+        delay(20);
+    }
 
-  gSensorThreshold = min + (max - min)/2;
-  Serial.print("Threshold: "); Serial.println(gSensorThreshold);  
+    waitForInput("Put robot completely off the line");
+    for(int i = 0; i < 20; ++i)
+    {
+        gQtrrc.calibrate();
+        delay(20);
+    }
+
+    int min = 0;
+    int max = 65535;
+    for (int i = 0; i < NUM_SENSORS; ++i)
+    {
+        if (gQtrrc.calibratedMinimumOn[i] > min)
+            min = gQtrrc.calibratedMinimumOn[i];
+        if (gQtrrc.calibratedMaximumOn[i] < max)
+            max = gQtrrc.calibratedMaximumOn[i];
+    }
+
+    gSensorThreshold = min + (max - min)/2;
+    Serial.print("Threshold: "); Serial.println(gSensorThreshold);  
 }
 
 //////////////////////////////////
@@ -111,95 +119,126 @@ void setup()
 
 bool OnTransversalLine()
 {
-  for(int i = 0; i < NUM_SENSORS; ++i)
-  {
-    if (gSensorValues[i] < gSensorThreshold)
-      return false;
-  }
-  return true;
+    for(int i = 0; i < NUM_SENSORS; ++i)
+    {
+        if (gSensorValues[i] < gSensorThreshold)
+            return false;
+    }
+    return true;
 }
 
 void robotStop()
 {
-  analogWrite(pinLeftMotorPwm, 0);
-  analogWrite(pinRightMotorPwm, 0);
-  gPIDEnabled = false;
+    analogWrite(pinLeftMotorPwm, 0);
+    analogWrite(pinRightMotorPwm, 0);
+    gPIDEnabled = false;
+    gErrorSum = 0;
+    gLastError = 0;
 }
 
 void robotGo(int speed)
 {
-  gPIDEnabled = true;
-  analogWrite(pinLeftMotorPwm, speed);
-  analogWrite(pinRightMotorPwm, speed);
+    gPIDEnabled = true;
+    gRightDirection = RIGHT_FORWARD;
+    gLeftDirection = LEFT_FORWARD;
+    analogWrite(pinLeftMotorPwm, speed);
+    digitalWrite(pinLeftMotorDir, gLeftDirection);
+    analogWrite(pinRightMotorPwm, speed);
+    digitalWrite(pinRightMotorDir, gRightDirection);
+}
+
+void robotRotate(int speed)
+{
+    gPIDEnabled = true;
+    analogWrite(pinLeftMotorPwm, speed);
+    digitalWrite(pinLeftMotorDir, LEFT_FORWARD);
+    analogWrite(pinRightMotorPwm, speed);
+    digitalWrite(pinRightMotorDir, RIGHT_BACKWARD);
+    
+    while(1)
+    {
+        int position = gQtrrc.readLine(gSensorValues);
+        if (position > 3000 || position < 4000)
+            break;
+    }
 }
 
 void updatePid()
 {
-  if (!gPIDEnabled)
-    return;
+    if (!gPIDEnabled)
+        return;
 
-  int position = gQtrrc.readLine(gSensorValues);
+    long dt = millis() - gLastTime;
+    if (dt < 10)
+        return;
 
-  if (OnTransversalLine())
-  {
-    Serial.println("OnTransversalLine");
-    robotStop();
-  }
+    gLastTime = millis();  
 
-  // Check the error on the sensor and the side
-  int error = SENSOR_MIDDLE - position;
-  Serial.print("Error: "); Serial.println(error);
+    int position = gQtrrc.readLine(gSensorValues);
+    Serial.print("Position: "); Serial.println(position);
 
-  // Calculate the needed correction
-  float correction = KP * error + KD * (error - gLastError);
-  int pwm_correction = (int)map(correction, -SENSOR_MIDDLE, +SENSOR_MIDDLE, -255, 255);
-  gLastError = error;
-  Serial.print("pwm_correction: "); Serial.println(pwm_correction);
+    if (OnTransversalLine())
+    {
+        Serial.println("OnTransversalLine");
+        robotStop();
+        return;
+    }
 
-  int left_speed = gSpeed;
-  int right_speed = gSpeed;
+    // PID
+    float error = 3500 - position;
+    float command = KP * error;
+    gErrorSum += KI * error;
+    command += KD * (error - gLastError);
+    gLastError = error;
 
-  if (pwm_correction > 0)
-  {
-    // turn left
-    left_speed += pwm_correction;
-    right_speed -= pwm_correction;
-  }
-  if (pwm_correction < 0)
-  {
-    // turn right
-    left_speed -= pwm_correction;
-    right_speed += pwm_correction;
-  }
+    command = constrain(command, -255, 255);
+    Serial.print("command: "); Serial.println(command);
 
-  left_speed = constrain(left_speed, -255, 255);
-  right_speed = constrain(right_speed, -255, 255);
+    int left_speed = gSpeed - command; 
+    int right_speed = gSpeed + command;
 
-  digitalWrite(pinLeftMotorDir, left_speed >= 0 ? LEFT_FORWARD : LEFT_BACKWARD);
-  analogWrite(pinLeftMotorPwm, abs(left_speed) + 40);
-  digitalWrite(pinRightMotorDir, right_speed >= 0 ? RIGHT_FORWARD : RIGHT_BACKWARD);
-  analogWrite(pinRightMotorPwm, abs(right_speed) + 40);
+    digitalWrite(pinLeftMotorDir, left_speed > 0 ? 
+                                 LEFT_FORWARD : LEFT_BACKWARD);
+    analogWrite(pinLeftMotorPwm, abs(left_speed));
 
-  Serial.print(left_speed); Serial.print(" "); Serial.println(right_speed);
+    digitalWrite(pinRightMotorDir, right_speed > 0 ? 
+                                RIGHT_FORWARD : RIGHT_BACKWARD);
+    analogWrite(pinRightMotorPwm, abs(right_speed));
+
+    Serial.print(left_speed); Serial.print(" "); Serial.println(right_speed);
 }
 
 void loop()
 {
-  updatePid();
+    updatePid();
 
-  if (Serial.available() > 0)
-  {
-    switch(Serial.read())
+    if (Serial.available() > 0)
     {
-      case 's':
-        robotStop();
-        break;
-
-      case 'g':
-        gSpeed = Serial.parseInt();
-        Serial.println(gSpeed);
-        robotGo(gSpeed);
-        break;
+        switch(Serial.read())
+        {
+            case 's':
+                robotStop();
+                break;
+            case 'g':
+                gSpeed = Serial.parseInt();
+                Serial.println(gSpeed);
+                robotGo(gSpeed);
+                break;
+            case 'r':
+                gSpeed = Serial.parseInt();
+                Serial.println(gSpeed);
+                robotRotate(gSpeed);
+                break;
+            case 'p':
+                KP = Serial.parseFloat();
+                break;
+            case 'i':
+                KI = Serial.parseFloat();
+                break;
+            case 'd':
+                KD = Serial.parseFloat();
+                break;
+                
+        }
     }
-  }
 }
