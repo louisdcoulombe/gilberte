@@ -20,7 +20,8 @@
 // The middle of the sensor
 #define SENSOR_MIDDLE 3500
 
-
+#define FORWARD 1
+#define BACKWARD 0
 #define LEFT_FORWARD   LOW
 #define LEFT_BACKWARD  HIGH
 #define RIGHT_FORWARD  HIGH
@@ -55,44 +56,57 @@ float KD = 0.18;
 int gSpeed = 100;
 
 int gLineLostTime = 0;
+int gDirection = FORWARD;
 
-byte gRightDirection = RIGHT_FORWARD;
-byte gLeftDirection = LEFT_FORWARD;
+//////////////////////////////////
+// Transversal lines
+//////////////////////////////////
+#define STATE_GO_HOME 0
+#define STATE_GO_NEXT 1
+byte gTransversalState = STATE_GO_NEXT;
 
+long gLastTransversalTime = 0;
+
+#define HOME_NONE 0
+#define HOME_FIRST_LINE 1
+#define HOME_GAP_TIME 2
+#define HOME_SECOND_LINE 3
+#define HOME_TIME_MAX 1000
+byte gHomeTransversalState = HOME_NONE;
 //////////////////////////////////
 // Setup
 //////////////////////////////////
-void waitForInput(char* msg)
+void waitForInput()
 {
-    Serial.println("Put robot completely on the line");
     while(Serial.available() <= 0);
     while(Serial.available() > 0)
         Serial.read();
 }
 
-void setup()
+void setDirection(int left_dir, int right_dir)
 {
-    // Définir la direction des pins
-    pinMode(pinLeftMotorPwm, OUTPUT);
-    pinMode(pinLeftMotorDir, OUTPUT);
+    digitalWrite(pinLeftMotorDir, left_dir);
+    digitalWrite(pinRightMotorDir, right_dir);
+}
 
-    pinMode(pinRightMotorPwm, OUTPUT);
-    pinMode(pinRightMotorDir, OUTPUT);
+void setSpeed(int left_speed, int right_speed)
+{
+    analogWrite(pinLeftMotorPwm, left_speed);
+    analogWrite(pinRightMotorPwm, right_speed);
+}
 
-    // Définir les états par défaut
-    digitalWrite(pinLeftMotorDir, LEFT_FORWARD);
-    digitalWrite(pinRightMotorDir, RIGHT_FORWARD);
-
-    Serial.begin(115200);
-
-    waitForInput("Put robot completely on the line");
+void calibrate_sensor()
+{
+    Serial.println("Put robot on the line"); 
+    waitForInput();
     for(int i = 0; i < 20; ++i)
     {
         gQtrrc.calibrate();
         delay(20);
     }
 
-    waitForInput("Put robot completely off the line");
+    Serial.println("Put robot off the line"); 
+    waitForInput();
     for(int i = 0; i < 20; ++i)
     {
         gQtrrc.calibrate();
@@ -113,6 +127,20 @@ void setup()
     Serial.print("Threshold: "); Serial.println(gSensorThreshold);  
 }
 
+void setup()
+{
+    Serial.begin(115200);
+
+    // Définir la direction des pins
+    pinMode(pinLeftMotorPwm, OUTPUT);
+    pinMode(pinLeftMotorDir, OUTPUT);
+    pinMode(pinRightMotorPwm, OUTPUT);
+    pinMode(pinRightMotorDir, OUTPUT);
+
+    // Calibrate IR sensor
+    calibrate_sensor();
+}
+
 //////////////////////////////////
 // Main loop
 //////////////////////////////////
@@ -127,41 +155,113 @@ bool OnTransversalLine()
     return true;
 }
 
-void robotStop()
+void resetPID()
 {
-    analogWrite(pinLeftMotorPwm, 0);
-    analogWrite(pinRightMotorPwm, 0);
     gPIDEnabled = false;
     gErrorSum = 0;
     gLastError = 0;
 }
 
+void robotStop()
+{
+    setSpeed(0, 0);
+    resetPID();
+}
+
 void robotGo(int speed)
 {
     gPIDEnabled = true;
-    gRightDirection = RIGHT_FORWARD;
-    gLeftDirection = LEFT_FORWARD;
-    analogWrite(pinLeftMotorPwm, speed);
-    digitalWrite(pinLeftMotorDir, gLeftDirection);
-    analogWrite(pinRightMotorPwm, speed);
-    digitalWrite(pinRightMotorDir, gRightDirection);
+    gDirection = FORWARD; 
+    setDirection(LEFT_FORWARD, RIGHT_FORWARD);
+    setSpeed(speed, speed);
+}
+
+void robotReverse(int speed)
+{
+    gPIDEnabled = true;
+    gDirection = BACKWARD;
+    setDirection(LEFT_BACKWARD, RIGHT_BACKWARD);
+    setSpeed(speed, speed);
 }
 
 void robotRotate(int speed)
 {
     gPIDEnabled = true;
-    analogWrite(pinLeftMotorPwm, speed);
-    digitalWrite(pinLeftMotorDir, LEFT_FORWARD);
-    analogWrite(pinRightMotorPwm, speed);
-    digitalWrite(pinRightMotorDir, RIGHT_BACKWARD);
-    
+    setDirection(LEFT_FORWARD, RIGHT_BACKWARD);
+    setSpeed(speed, speed);
+
+    // Wait before we don't see the line 
+    delay(500);
+
+    // Rotate until we see the line again
     while(1)
     {
         int position = gQtrrc.readLine(gSensorValues);
         if (position > 3000 || position < 4000)
             break;
     }
+
+    // Close enough to stop rotating
+    robotStop();
 }
+
+bool TransversaLineLogic()
+{
+    bool isTransversal = OnTransversalLine();
+
+    // Gap between home line, change state and continue
+    if (!isTransversal && gHomeTransversalState == HOME_FIRST_LINE)
+    {
+        Serial.println("Found gap");
+        gHomeTransversalState = HOME_GAP_TIME;
+        return true;
+    }
+
+    // Every other states needs to be on the line
+    if (!isTransversal)
+        return true;
+
+    // On go next, stop at the first line we see
+    if (gTransversalState == STATE_GO_NEXT)
+    {
+        Serial.println("Found next, stopping");
+        robotStop();
+        gLastTransversalTime = 0;
+        gHomeTransversalState = HOME_NONE;
+        return false;
+    }
+
+    // Calculate time between two lines
+    long last_line_time = millis() - gLastTransversalTime;
+    gLastTransversalTime = millis();
+
+    // Gap expired, reset state
+    if (gHomeTransversalState == HOME_FIRST_LINE && last_line_time > HOME_TIME_MAX)
+    {
+        gHomeTransversalState = HOME_NONE; 
+        Serial.println("Home exipred");
+        return true;
+    }
+
+    // First time we see the line, change state and continue
+    if (gHomeTransversalState == HOME_NONE)
+    {
+        Serial.println("Found first line");
+        gHomeTransversalState = HOME_FIRST_LINE;
+        return true;
+    }
+
+    // Second home line, stop there
+    if (gHomeTransversalState == HOME_GAP_TIME && last_line_time <= HOME_TIME_MAX)
+    {
+        Serial.println("Found Home, stopping");
+        gHomeTransversalState = HOME_NONE;
+        robotStop();
+        return false;
+    }
+
+    return true;
+} 
 
 void updatePid()
 {
@@ -175,14 +275,11 @@ void updatePid()
     gLastTime = millis();  
 
     int position = gQtrrc.readLine(gSensorValues);
-    Serial.print("Position: "); Serial.println(position);
+    //Serial.print("Position: "); Serial.println(position);
 
-    if (OnTransversalLine())
-    {
-        Serial.println("OnTransversalLine");
-        robotStop();
+    // Check for line, on false we stop
+    if (!TransversaLineLogic())
         return;
-    }
 
     // PID
     float error = 3500 - position;
@@ -192,20 +289,27 @@ void updatePid()
     gLastError = error;
 
     command = constrain(command, -255, 255);
-    Serial.print("command: "); Serial.println(command);
+    //Serial.print("command: "); Serial.println(command);
 
-    int left_speed = gSpeed - command; 
-    int right_speed = gSpeed + command;
+    int left_speed, right_speed;
+    if (gDirection == FORWARD)
+    {
+        left_speed = gSpeed - command; 
+        right_speed = gSpeed + command;
+    }
+    else
+    {
+        left_speed = gSpeed + command;
+        right_speed = gSpeed - command;
+    }
 
-    digitalWrite(pinLeftMotorDir, left_speed > 0 ? 
-                                 LEFT_FORWARD : LEFT_BACKWARD);
-    analogWrite(pinLeftMotorPwm, abs(left_speed));
+    int left_dir = left_speed > 0 ?  LEFT_FORWARD : LEFT_BACKWARD;
+    int right_dir = right_speed > 0 ? RIGHT_FORWARD : RIGHT_BACKWARD;
 
-    digitalWrite(pinRightMotorDir, right_speed > 0 ? 
-                                RIGHT_FORWARD : RIGHT_BACKWARD);
-    analogWrite(pinRightMotorPwm, abs(right_speed));
+    setDirection(left_dir, right_dir);
+    setSpeed(abs(left_speed), abs(right_speed));
 
-    Serial.print(left_speed); Serial.print(" "); Serial.println(right_speed);
+    //Serial.print(left_speed); Serial.print(" "); Serial.println(right_speed);
 }
 
 void loop()
@@ -221,24 +325,33 @@ void loop()
                 break;
             case 'g':
                 gSpeed = Serial.parseInt();
+                gTransversalState = STATE_GO_HOME;
+                Serial.println(gSpeed);
+                robotGo(gSpeed);
+                break;
+            case 'n':
+                gSpeed = Serial.parseInt();
+                gTransversalState = STATE_GO_NEXT;
                 Serial.println(gSpeed);
                 robotGo(gSpeed);
                 break;
             case 'r':
-                gSpeed = Serial.parseInt();
-                Serial.println(gSpeed);
-                robotRotate(gSpeed);
+                gDirection = !gDirection;
+                Serial.print("Direction: "); Serial.println(gDirection);
                 break;
             case 'p':
                 KP = Serial.parseFloat();
+                Serial.print("KP: "); Serial.println(KP);
                 break;
             case 'i':
                 KI = Serial.parseFloat();
+                Serial.print("KI: "); Serial.println(KI);
                 break;
             case 'd':
                 KD = Serial.parseFloat();
+                Serial.print("KD: "); Serial.println(KD);
                 break;
-                
+
         }
     }
 }
