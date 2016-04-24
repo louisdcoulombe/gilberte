@@ -9,31 +9,17 @@
 #define pinRightMotorDir  12
 
 //////////////////////////////////
-// Constant definition
+// Sensor definition
 //////////////////////////////////
+
 // number of sensors used
 #define NUM_SENSORS   8     
 // waits for 2500 microseconds for sensor outputs to go low
-#define TIMEOUT       2500  
+#define TIMEOUT       2500
 // emitter is controlled by digital pin 2
 #define EMITTER_PIN   13 
 // The middle of the sensor
 #define SENSOR_MIDDLE 3500
-
-#define FORWARD 1
-#define BACKWARD 0
-#define LEFT_FORWARD   LOW
-#define LEFT_BACKWARD  HIGH
-#define RIGHT_FORWARD  HIGH
-#define RIGHT_BACKWARD LOW
-
-#define LEFT  1
-#define RIGHT 0
-
-//////////////////////////////////
-// Sensor definition
-//////////////////////////////////
-
 // sensors 0 through 7 are connected to digital pins 3 through 10
 QTRSensorsRC gQtrrc((unsigned char[]) {
         A5, 9, 8, 10, A0, A1, A2, A4
@@ -45,6 +31,16 @@ unsigned int gSensorThreshold = 0;
 //////////////////////////////////
 // PID definition
 //////////////////////////////////
+#define FORWARD 1
+#define BACKWARD 0
+#define LEFT_FORWARD   LOW
+#define LEFT_BACKWARD  HIGH
+#define RIGHT_FORWARD  HIGH
+#define RIGHT_BACKWARD LOW
+
+#define LEFT  1
+#define RIGHT 0
+
 bool gPIDEnabled = false;
 long gLastTime = 0;
 float gErrorSum = 0;
@@ -168,7 +164,7 @@ void robotStop()
     resetPID();
 }
 
-void robotGo(int speed)
+void robotForward(int speed)
 {
     gPIDEnabled = true;
     gDirection = FORWARD; 
@@ -291,24 +287,23 @@ void updatePid()
     command = constrain(command, -255, 255);
     //Serial.print("command: "); Serial.println(command);
 
+    int left_speed = gSpeed - command; 
+    int right_speed = gSpeed + command;
+
     int left_speed, right_speed;
     if (gDirection == FORWARD)
     {
-        left_speed = gSpeed - command; 
-        right_speed = gSpeed + command;
+        left_speed = left_speed > 0 ? LEFT_FORWARD : LEFT_BACKWARD;
+        right_speed = right_speed > 0 ? RIGHT_FORWARD : RIGHT_BACKWARD;
     }
     else
     {
-        left_speed = gSpeed + command;
-        right_speed = gSpeed - command;
+        left_speed = left_speed > 0 ? LEFT_BACKWARD : LEFT_FORWARD;
+        right_speed = right_speed > 0 ? RIGHT_BACKWARD : RIGHT_FORWARD;
     }
-
-    int left_dir = left_speed > 0 ?  LEFT_FORWARD : LEFT_BACKWARD;
-    int right_dir = right_speed > 0 ? RIGHT_FORWARD : RIGHT_BACKWARD;
 
     setDirection(left_dir, right_dir);
     setSpeed(abs(left_speed), abs(right_speed));
-
     //Serial.print(left_speed); Serial.print(" "); Serial.println(right_speed);
 }
 
@@ -327,19 +322,28 @@ void loop()
                 gSpeed = Serial.parseInt();
                 gTransversalState = STATE_GO_HOME;
                 Serial.println(gSpeed);
-                robotGo(gSpeed);
+                robotForward(gSpeed);
                 break;
             case 'n':
                 gSpeed = Serial.parseInt();
                 gTransversalState = STATE_GO_NEXT;
                 Serial.println(gSpeed);
-                robotGo(gSpeed);
+                robotForward(gSpeed);
                 break;
             case 'r':
-                gDirection = !gDirection;
-                Serial.print("Direction: "); Serial.println(gDirection);
+                gSpeed = Serial.parseInt();
+                gTransversalState = STATE_GO_HOME;
+                Serial.println(gSpeed);
+                robotForward(gSpeed);
                 break;
             case 'p':
+                gSpeed = Serial.parseInt();
+                gTransversalState = STATE_GO_NEXT;
+                Serial.println(gSpeed);
+                robotReverse(gSpeed);
+                break;
+            // Configuration
+            case 'o':
                 KP = Serial.parseFloat();
                 Serial.print("KP: "); Serial.println(KP);
                 break;
