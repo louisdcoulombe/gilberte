@@ -174,7 +174,7 @@ void robotForward(int speed)
 
 void robotReverse(int speed)
 {
-    gPIDEnabled = true;
+    //gPIDEnabled = true;
     gDirection = BACKWARD;
     setDirection(LEFT_BACKWARD, RIGHT_BACKWARD);
     setSpeed(speed, speed);
@@ -205,6 +205,10 @@ bool TransversaLineLogic()
 {
     bool isTransversal = OnTransversalLine();
 
+    // Calculate time between two lines
+    long last_line_time = millis() - gLastTransversalTime;
+    gLastTransversalTime = millis();
+
     // Gap between home line, change state and continue
     if (!isTransversal && gHomeTransversalState == HOME_FIRST_LINE)
     {
@@ -217,6 +221,7 @@ bool TransversaLineLogic()
     if (!isTransversal)
         return true;
 
+
     // On go next, stop at the first line we see
     if (gTransversalState == STATE_GO_NEXT)
     {
@@ -227,9 +232,6 @@ bool TransversaLineLogic()
         return false;
     }
 
-    // Calculate time between two lines
-    long last_line_time = millis() - gLastTransversalTime;
-    gLastTransversalTime = millis();
 
     // Gap expired, reset state
     if (gHomeTransversalState == HOME_FIRST_LINE && last_line_time > HOME_TIME_MAX)
@@ -290,17 +292,19 @@ void updatePid()
     int left_speed = gSpeed - command; 
     int right_speed = gSpeed + command;
 
-    int left_speed, right_speed;
+    int left_dir, right_dir;
     if (gDirection == FORWARD)
     {
-        left_speed = left_speed > 0 ? LEFT_FORWARD : LEFT_BACKWARD;
-        right_speed = right_speed > 0 ? RIGHT_FORWARD : RIGHT_BACKWARD;
     }
     else
     {
-        left_speed = left_speed > 0 ? LEFT_BACKWARD : LEFT_FORWARD;
-        right_speed = right_speed > 0 ? RIGHT_BACKWARD : RIGHT_FORWARD;
+        left_dir = left_speed > 0 ? LEFT_BACKWARD : LEFT_FORWARD;
+        right_dir = right_speed > 0 ? RIGHT_BACKWARD : RIGHT_FORWARD;
     }
+    
+
+    left_dir = left_speed > 0 ? LEFT_FORWARD : LEFT_BACKWARD;
+    right_dir = right_speed > 0 ? RIGHT_FORWARD : RIGHT_BACKWARD;
 
     setDirection(left_dir, right_dir);
     setSpeed(abs(left_speed), abs(right_speed));
@@ -334,7 +338,7 @@ void loop()
                 gSpeed = Serial.parseInt();
                 gTransversalState = STATE_GO_HOME;
                 Serial.println(gSpeed);
-                robotForward(gSpeed);
+                robotReverse(gSpeed);
                 break;
             case 'p':
                 gSpeed = Serial.parseInt();
