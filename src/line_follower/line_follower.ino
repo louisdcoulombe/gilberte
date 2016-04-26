@@ -45,10 +45,13 @@ bool gPIDEnabled = false;
 long gLastTime = 0;
 float gErrorSum = 0;
 float gLastError = 0;
-float KP = 0.125;
-float KI = 0.4;
-float KD = 0.18;
+float FWD_KP = 0.125;
+float FWD_KI = 0.0;
+float FWD_KD = 0.18;
 
+float BWD_KP = 0.001;
+float BWD_KI = 0.0;
+float BWD_KD = 0.01;
 int gSpeed = 100;
 
 int gLineLostTime = 0;
@@ -281,20 +284,36 @@ void updatePid()
 
     // PID
     float error = 3500 - position;
-    float command = KP * error;
-    gErrorSum += KI * error;
-    command += KD * (error - gLastError);
-    gLastError = error;
+    
+    float command;
+    if (gDirection == FORWARD)
+    {
+        command = FWD_KP * error;
+        gErrorSum += FWD_KI * error;
+        command += gErrorSum;
+        command += FWD_KD * (error - gLastError);
+        gLastError = error;
+    }
+    else
+    {
+        command = BWD_KP * error;
+        gErrorSum += BWD_KI * error;
+        command += gErrorSum;
+        command += BWD_KD * (error - gLastError);
+        gLastError = error;
+    }
 
     command = constrain(command, -255, 255);
     //Serial.print("command: "); Serial.println(command);
 
-    int left_speed = gSpeed - command; 
-    int right_speed = gSpeed + command;
+    int left_speed = constrain(gSpeed - command, -255, 255);
+    int right_speed = constrain(gSpeed + command, -255, 255);
 
     int left_dir, right_dir;
     if (gDirection == FORWARD)
     {
+        left_dir = left_speed > 0 ? LEFT_FORWARD : LEFT_BACKWARD;
+        right_dir = right_speed > 0 ? RIGHT_FORWARD : RIGHT_BACKWARD;
     }
     else
     {
@@ -302,10 +321,6 @@ void updatePid()
         right_dir = right_speed > 0 ? RIGHT_BACKWARD : RIGHT_FORWARD;
     }
     
-
-    left_dir = left_speed > 0 ? LEFT_FORWARD : LEFT_BACKWARD;
-    right_dir = right_speed > 0 ? RIGHT_FORWARD : RIGHT_BACKWARD;
-
     setDirection(left_dir, right_dir);
     setSpeed(abs(left_speed), abs(right_speed));
     //Serial.print(left_speed); Serial.print(" "); Serial.println(right_speed);
@@ -348,16 +363,16 @@ void loop()
                 break;
             // Configuration
             case 'o':
-                KP = Serial.parseFloat();
-                Serial.print("KP: "); Serial.println(KP);
+                FWD_KP = Serial.parseFloat();
+                Serial.print("FWD_KP: "); Serial.println(FWD_KP);
                 break;
             case 'i':
-                KI = Serial.parseFloat();
-                Serial.print("KI: "); Serial.println(KI);
+                FWD_KI = Serial.parseFloat();
+                Serial.print("FWD_KI: "); Serial.println(FWD_KI);
                 break;
             case 'd':
-                KD = Serial.parseFloat();
-                Serial.print("KD: "); Serial.println(KD);
+                FWD_KD = Serial.parseFloat();
+                Serial.print("FWD_KD: "); Serial.println(FWD_KD);
                 break;
 
         }
