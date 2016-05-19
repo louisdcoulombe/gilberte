@@ -109,9 +109,13 @@ void calibrate_sensor()
             min = gQtrrc.calibratedMinimumOn[i];
         if (gQtrrc.calibratedMaximumOn[i] < max)
             max = gQtrrc.calibratedMaximumOn[i];
+
+        Serial.print(gQtrrc.calibratedMinimumOn[i]);
+        Serial.print(" ");
+        Serial.println(gQtrrc.calibratedMaximumOn[i]);
     }
 
-    gSensorThreshold = min + (max - min)/2;
+    gSensorThreshold = min(min + (max - min)/2, 500);
     Serial.print("Threshold: "); Serial.println(gSensorThreshold);  
 }
 
@@ -148,14 +152,14 @@ void loop()
                 break;
             // Go home
             case 'g':
-                gSpeed = Serial.parseInt();
+                gSpeed = 60;//Serial.parseInt();
                 gTransversalState = STATE_GO_HOME;
                 Serial.println(gSpeed);
                 robotForward(gSpeed);
                 break;
             // Go to next line
             case 'n':
-                gSpeed = Serial.parseInt();
+                gSpeed = 60;//Serial.parseInt();
                 gTransversalState = STATE_GO_NEXT;
                 Serial.println(gSpeed);
                 robotForward(gSpeed);
@@ -174,19 +178,38 @@ void loop()
                 Serial.println(gSpeed);
                 robotReverse(gSpeed);
                 break;
+            // U-turn
+            case 'u':
+                robotRotate(60);
+                break;
             // Configuration
+            case 't':
+                gSensorThreshold = Serial.parseInt();
+                break;
             case 'o':
-                FWD_KP = Serial.parseFloat();
-                Serial.print("FWD_KP: "); Serial.println(FWD_KP);
+                BWD_KP = Serial.parseFloat();
+                Serial.print("BWD_KP: "); Serial.println(BWD_KP);
                 break;
             case 'i':
-                FWD_KI = Serial.parseFloat();
-                Serial.print("FWD_KI: "); Serial.println(FWD_KI);
+                BWD_KI = Serial.parseFloat();
+                Serial.print("BWD_KI: "); Serial.println(BWD_KI);
                 break;
             case 'd':
-                FWD_KD = Serial.parseFloat();
-                Serial.print("FWD_KD: "); Serial.println(FWD_KD);
+                BWD_KD = Serial.parseFloat();
+                Serial.print("BWD_KD: "); Serial.println(BWD_KD);
+             case 'O':
+                BWD_KP = Serial.parseFloat();
+                Serial.print("BWD_KP: "); Serial.println(BWD_KP);
                 break;
+            case 'I':
+                BWD_KI = Serial.parseFloat();
+                Serial.print("BWD_KI: "); Serial.println(BWD_KI);
+                break;
+            case 'D':
+                BWD_KD = Serial.parseFloat();
+                Serial.print("BWD_KD: "); Serial.println(BWD_KD);
+                break;
+               break;
 
         }
     }

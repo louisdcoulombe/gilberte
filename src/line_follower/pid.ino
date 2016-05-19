@@ -9,7 +9,7 @@ void resetPID()
 bool TransversaLineLogic()
 {
     bool isTransversal = OnTransversalLine();
-
+    
     // Calculate time between two lines
     long last_line_time = millis() - gLastTransversalTime;
     gLastTransversalTime = millis();
@@ -34,6 +34,8 @@ bool TransversaLineLogic()
         robotStop();
         gLastTransversalTime = 0;
         gHomeTransversalState = HOME_NONE;
+
+        robotBackOnLine();
         return false;
     }
 
@@ -60,6 +62,7 @@ bool TransversaLineLogic()
         Serial.println("Found Home, stopping");
         gHomeTransversalState = HOME_NONE;
         robotStop();
+        robotBackOnLine();
         return false;
     }
 
